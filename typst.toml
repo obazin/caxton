@@ -1,0 +1,11 @@
+[package]
+name = "caxton"
+version = "0.1.0"
+entrypoint = "lib.typ"
+authors = ["Olivier Bazin"]
+license = "MIT"
+description = "Typeset an annotated PGN chess game as a print-ready, book-style page."
+repository = "https://github.com/obazin/caxton"
+keywords = ["chess", "pgn", "book", "typography", "diagram"]
+categories = ["visualization"]
+compiler = "0.15.1"
