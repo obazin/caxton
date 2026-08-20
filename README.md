@@ -1,6 +1,6 @@
 # caxton
 
-Typeset an annotated PGN chess game as a print-ready, book-style page — built on [`staunton`](https://github.com/ndg6/staunton). Point it at a PGN and it renders figurine move notation with bold mainline moves, nested variations, NAGs and comments, diagrams placed exactly where the PGN marks them, and a title/subtitle read straight from the PGN's own tags. Named after William Caxton, who introduced printing to England.
+Typeset annotated PGN chess games as print-ready, book-style pages — built on [`staunton`](https://github.com/ndg6/staunton). Point it at a PGN and it renders figurine move notation with bold mainline moves, nested variations, NAGs and comments, diagrams placed exactly where the PGN marks them, and a title/subtitle read straight from the PGN's own tags. A PGN holding several games (the usual multi-game file layout) is typeset game by game, each starting on a fresh page with its own title, subtitle and running header. Named after William Caxton, who introduced printing to England.
 
 ![Example page](examples/preview.png)
 
@@ -25,7 +25,13 @@ A diagram is inserted after a move whose comment contains either:
 
 The marker is stripped before the surrounding text is printed as prose, so it never shows up in the book. Either form can carry ordinary commentary alongside it — `{Some prose. [#]}` and `{# Some prose}` both work: the diagram is drawn, and "Some prose." is printed as a normal paragraph.
 
-**If a game has no markers anywhere**, one diagram is drawn at the final position instead, so output is never diagram-less. Once a game has *any* real marker, placement becomes purely marker-driven — no automatic diagram is added anywhere else.
+**If a game has no markers anywhere**, diagrams are placed automatically instead:
+
+- In an **annotated** game, a diagram follows each heavily annotated mainline move (a comment of roughly a paragraph — 180+ characters), with no two diagrams closer than 6 plies (3 full moves) so dense commentary doesn't drown the page in boards.
+- In a game with **no comments at all**, a diagram is drawn every 8 full moves.
+- The **final position** always gets a diagram (an automatic one falling fewer than 6 plies before it is dropped in its favour), so output is never diagram-less.
+
+Once a game has *any* real marker, placement becomes purely marker-driven — no automatic diagram is added anywhere else.
 
 ### Why not staunton's own markers?
 
@@ -37,9 +43,9 @@ There's also a correctness reason to reimplement this rather than call `notation
 
 ```typ
 #caxton(
-  pgn,                    // required: PGN text (string, or a ```raw block```)
-  title: auto,             // auto: "White -- Black" from the PGN tags; content; none
-  subtitle: auto,           // auto: "Event, Year" from the PGN tags; content; none
+  pgn,                    // required: PGN text (string, or a ```raw block```); may hold several games
+  title: auto,             // auto: "White -- Black" from each game's tags; content; none
+  subtitle: auto,           // auto: "Event, Year" from each game's tags; content; none
   paper: "a5",
   columns: 2,
   margin: auto,             // auto: proportioned for the default A5/2-column layout
@@ -56,6 +62,8 @@ There's also a correctness reason to reimplement this rather than call `notation
 )
 ```
 
+With a multi-game PGN, each game starts on a fresh page; `title`/`subtitle` left as `auto` resolve from each game's own tags, while an explicit value applies to every game.
+
 Every field is overridable. The defaults reproduce the two-column A5, diagonally-hatched "old chess book" look this package started as; nothing about the layout is hardcoded beyond those defaults. `board-color-theme` takes any `staunton` `color-theme(..)` value — e.g. a normal green/cream board:
 
 ```typ
@@ -63,7 +71,21 @@ Every field is overridable. The defaults reproduce the two-column A5, diagonally
 #caxton(read("game.pgn"), board-color-theme: color-theme("wikipedia"), board-labels: true)
 ```
 
-`font` needs a fallback covering the Unicode chess-figurine block (U+2654–U+265F) for pieces to render instead of tofu boxes — `"Arial Unicode MS"` and `"Apple Symbols"` both work on macOS; the former is noticeably better-weighted and baseline-aligned against most body fonts.
+### Fonts
+
+No fonts ship with the package (Typst packages can't bundle fonts) — the defaults only *name* system fonts, and all three (`Avenir Next`, `Arial Unicode MS`, `Baskerville`) are macOS system fonts. On other platforms Typst warns about the unknown families and silently falls back, which usually still compiles but not with the intended look.
+
+`font` needs a fallback covering the Unicode chess-figurine block (U+2654–U+265F) for pieces to render instead of tofu boxes — on macOS, `"Arial Unicode MS"` and `"Apple Symbols"` both work; the former is noticeably better-weighted and baseline-aligned against most body fonts.
+
+**On Linux**, a close all-free substitute stack is Montserrat (for Avenir Next), DejaVu Sans (its chess glyphs are well-drawn and cover the figurine block), and Libre Baskerville:
+
+```typ
+#caxton(read("game.pgn"),
+  font: ("Montserrat", "DejaVu Sans"),
+  header-font: "Libre Baskerville")
+```
+
+On Arch, `pacman -S ttf-montserrat ttf-dejavu` covers the first two; Libre Baskerville can be dropped into `~/.local/share/fonts` from [its upstream repo](https://github.com/impallari/Libre-Baskerville) (OFL-licensed, as is Montserrat). Debian/Ubuntu equivalents: `fonts-montserrat`, `fonts-dejavu`. If no figurine-capable font is installed at all, `gnu-free-fonts`' FreeSerif also covers the block, at some cost in glyph weight.
 
 `to-move-marker` is purely decorative (an echo of the small side-to-move triangle printed in some older chess books) — it does not indicate which side is actually to move.
 

@@ -1,10 +1,12 @@
 // ===========================================================================
-// caxton -- typeset an annotated PGN chess game as a print-ready book page.
+// caxton -- typeset annotated PGN chess games as print-ready book pages.
 //
 // Built on top of the `staunton` chess package (@preview/staunton). Renders
 // figurine move notation with bold mainline moves, nested variations, NAGs
 // and comments, with diagrams embedded exactly where the PGN itself marks
-// them -- not at arbitrary fixed intervals.
+// them -- not at arbitrary fixed intervals. A PGN holding several games is
+// typeset game by game, each starting on a fresh page with its own title,
+// subtitle and running header read from that game's tags.
 //
 // Diagram placement follows the two markers real chess software actually
 // writes into PGN comments. These were verified against ChessBase, Scid and
@@ -14,8 +16,10 @@
 //   - `[#]` anywhere in a comment       (ChessBase / RPB Chessboard)
 //   - a comment that STARTS with `#`     (Scid's own documented rule)
 // The marker is stripped before the surrounding comment is printed as prose.
-// If a game carries no markers at all, one diagram is drawn at the final
-// position instead, so output is never diagram-less.
+// If a game carries no markers at all, diagrams are placed automatically:
+// after heavily-annotated mainline moves (with a minimum spacing between
+// diagrams), or at a fixed move interval when the game has no comments at
+// all -- and always at the final position, so output is never diagram-less.
 //
 // (staunton's `notation(diagrams: true)` recognises a bare `#`, an
 // `#[caption]` form, and `[d]`/`[D]`, plus `\diagram`/`%%diagram` -- of these,
@@ -52,6 +56,40 @@
   if raw == none { return (has-marker: false, has-prose: false, prose: "") }
   let r = _strip-marker(raw)
   (has-marker: r.has-marker, has-prose: r.prose != "", prose: r.prose)
+}
+
+// ---- automatic diagram placement -------------------------------------------
+
+// When a game carries no explicit diagram marker anywhere, diagrams are placed
+// automatically instead: after each heavily-annotated mainline move (prose of
+// `_heavy-prose-chars` characters or more), with no two diagrams closer than
+// `_min-diagram-gap` plies -- or, if the game has no comments at all, every
+// 8 full moves. The final position always gets a diagram; an auto point fewer
+// than `_min-diagram-gap` plies before it is dropped in its favour, so output
+// is never diagram-less and never near-duplicated at the end.
+#let _heavy-prose-chars = 180
+#let _min-diagram-gap = 6
+#let _plain-interval = 16  // plies between diagrams in an uncommented game
+
+// -> array of 0-based mainline node indexes after which to draw a diagram.
+#let _diagram-points(nodes) = {
+  let marked = range(nodes.len()).filter(i => _comment-info(nodes.at(i)).has-marker)
+  if marked.len() > 0 { return marked }
+  let candidates = if nodes.any(n => _comment-info(n).has-prose) {
+    range(nodes.len()).filter(i => _comment-info(nodes.at(i)).prose.len() >= _heavy-prose-chars)
+  } else {
+    range(nodes.len()).filter(i => calc.rem(i + 1, _plain-interval) == 0)
+  }
+  let pts = ()
+  for i in candidates {
+    if pts.len() == 0 or i - pts.last() >= _min-diagram-gap { pts.push(i) }
+  }
+  let last = nodes.len() - 1
+  if pts.len() > 0 and pts.last() != last and last - pts.last() < _min-diagram-gap {
+    let _ = pts.pop()
+  }
+  if pts.len() == 0 or pts.last() != last { pts.push(last) }
+  pts
 }
 
 // ---- locator arithmetic ----------------------------------------------------
@@ -92,15 +130,57 @@
   if parts.len() == 0 { none } else { parts.join(", ") }
 }
 
-/// Typeset a single annotated PGN game as a print-ready book page.
+// ---- multi-game splitting ---------------------------------------------------
+
+// Split raw (un-collapsed) PGN text into one string per game. A new game
+// begins at a tag-pair line once the current game's movetext has been seen.
+// Brace-comment state is tracked across lines so a hard-wrapped comment line
+// that happens to start with `[` is never mistaken for a new tag section
+// (PGN `{}` comments don't nest; `;` comments run to end of line).
+#let _split-games(text) = {
+  let tag-rest = regex("^[A-Za-z0-9_]+\s*\"")
+  let games = ()
+  let current = ()
+  let in-comment = false
+  let seen-movetext = false
+  for line in text.split("\n") {
+    let stripped = line.trim()
+    if not in-comment and stripped != "" {
+      let is-tag = stripped.starts-with("[") and stripped.slice(1).trim().match(tag-rest) != none
+      if is-tag and seen-movetext {
+        games.push(current.join("\n"))
+        current = ()
+        seen-movetext = false
+      } else if not is-tag {
+        seen-movetext = true
+      }
+    }
+    current.push(line)
+    for c in line.clusters() {
+      if in-comment {
+        if c == "}" { in-comment = false }
+      } else {
+        if c == "{" { in-comment = true } else if c == ";" { break }
+      }
+    }
+  }
+  games.push(current.join("\n"))
+  games.filter(g => g.trim() != "")
+}
+
+/// Typeset one or more annotated PGN games as print-ready book pages.
 ///
 /// - pgn (str, content): the raw PGN text (a string, or a ```` ```raw block ````).
-///   Hard-wrapped comment newlines are collapsed to spaces before parsing, so
-///   a PGN wrapped at a fixed column doesn't force mid-sentence line breaks.
+///   May contain several games back to back (the usual multi-game PGN file
+///   layout); each game starts on a fresh page. Hard-wrapped comment newlines
+///   are collapsed to spaces before parsing, so a PGN wrapped at a fixed
+///   column doesn't force mid-sentence line breaks.
 /// - title (auto, content, none): page header / title line. `auto` reads
-///   "White -- Black" from the PGN's own tags; `none` omits it.
+///   "White -- Black" from each game's own tags; `none` omits it. An explicit
+///   value applies to every game in the PGN.
 /// - subtitle (auto, content, none): line under the title. `auto` reads
-///   "Event, Year" from the PGN's tags; `none` omits it.
+///   "Event, Year" from each game's tags; `none` omits it. An explicit value
+///   applies to every game in the PGN.
 /// - paper (str): page size, forwarded to `#set page(paper: ..)`.
 /// - columns (int): column count, forwarded to `#set page(columns: ..)`.
 /// - margin (auto, dictionary, length): page margin; `auto` picks a margin
@@ -146,33 +226,19 @@
   to-move-marker: true,
   marker-gap: auto,
 ) = {
-  // Hard-wrapped comment newlines (common in exported/book PGNs) become plain
-  // spaces before parsing, so justification -- not the source file's column
-  // width -- decides where lines actually break.
-  let pgn-text = {
-    let t = if type(pgn) == str { pgn }
-      else if type(pgn) == content and pgn.func() == raw { pgn.text }
-      else { panic("caxton: `pgn` must be a string or a raw block") }
-    t.replace(regex("\s+"), " ")
-  }
-  let g = game(pgn-text)
-  let start = game-start(g)
-  let loc-of(i) = _locator-of-index(i, start)
+  // Splitting into games is line-based, so it happens on the raw text --
+  // before hard-wrapped newlines are collapsed away.
+  let raw-text = if type(pgn) == str { pgn }
+    else if type(pgn) == content and pgn.func() == raw { pgn.text }
+    else { panic("caxton: `pgn` must be a string or a raw block") }
+  let games = _split-games(raw-text)
 
   let gap = if marker-gap == auto { board-size / 8 / 1.5 } else { marker-gap }
-  let ttl = if title != auto { title } else { _auto-title(g) }
-  let sub = if subtitle != auto { subtitle } else { _auto-subtitle(g) }
 
   set page(
     paper: paper,
     margin: if margin == auto { (top: 20mm, bottom: 16mm, x: 12mm) } else { margin },
     columns: columns,
-    header: if ttl == none { none } else { context [
-      #set text(font: header-font, style: "italic", size: 9.5pt)
-      #grid(columns: (1fr, auto), ttl, align(right)[#counter(page).display()])
-      #v(-2pt)
-      #line(length: 100%, stroke: 0.4pt + luma(120))
-    ] },
   )
   set text(font: font, size: text-size, hyphenate: true)
   set par(justify: true, leading: leading)
@@ -182,15 +248,6 @@
     border: board-border,
     color-theme: board-color-theme,
   )
-
-  if ttl != none or sub != none {
-    align(center)[
-      #if ttl != none { text(size: 18pt, weight: "bold", ttl) }
-      #if ttl != none and sub != none { v(0.2em) }
-      #if sub != none { text(size: 12pt, style: "italic", sub) }
-    ]
-    v(1em)
-  }
 
   // The triangle sits just outside the board's bottom-right corner --
   // `breakable: false` keeps the board and its marker together instead of
@@ -202,57 +259,90 @@
     }
   ]
 
-  let nodes = movetext(g)
-  let any-marker = nodes.any(n => _comment-info(n).has-marker)
+  for (game-index, game-text) in games.enumerate() {
+    // Hard-wrapped comment newlines (common in exported/book PGNs) become
+    // plain spaces before parsing, so justification -- not the source file's
+    // column width -- decides where lines actually break.
+    let g = game(game-text.replace(regex("\s+"), " "))
+    let start = game-start(g)
+    let loc-of(i) = _locator-of-index(i, start)
 
-  // A PGN comment BEFORE the very first move (e.g. an introductory note) is
-  // carried as the first node's `comment-before` -- `notation()` never
-  // renders that field (only `comment-after`), so it needs printing by hand.
-  let intro = nodes.first().at("comment-before", default: none)
-  if intro != none {
-    [#intro.trim()]
-    parbreak()
-  }
+    let ttl = if title != auto { title } else { _auto-title(g) }
+    let sub = if subtitle != auto { subtitle } else { _auto-subtitle(g) }
 
-  let run-start = 0
-  for (i, node) in nodes.enumerate() {
-    let loc = loc-of(i)
-    let info = _comment-info(node)
-    let is-last = i == nodes.len() - 1
-    // Pure marker-driven placement when the game carries any; otherwise a
-    // single diagram at the final position, so output is never diagram-less.
-    let is-diagram-point = if any-marker { info.has-marker } else { is-last }
-    if info.has-prose or info.has-marker or is-last {
-      // `comments: true` is needed so prose nested INSIDE a variation still
-      // renders -- not just this run's own trailing comment. But staunton's
-      // `_move-token` concatenates a MAINLINE move's own trailing comment
-      // into the same string as the move before `strong()` wraps it, so
-      // printing it through `comments: true` here would bold the prose (and
-      // the marker) along with the move -- variations dodge this because
-      // they always render through a separate `bold: false` call. Blank out
-      // just this run's own ending comment before rendering (nested-variation
-      // comments elsewhere in the range are untouched), then print the
-      // cleaned, marker-stripped text as its own ordinary-weight paragraph.
-      let notation-source = if info.has-prose or info.has-marker {
-        let overrides = (:)
-        overrides.insert(loc, "")
-        with-comments(g, comments: overrides)
-      } else { g }
-      notation(
-        notation-source, from: loc-of(run-start), to: loc,
-        figurine: true, nags: true, variations: true, comments: true, spaced: false,
-        result: is-last,
-      )
+    if game-index > 0 { pagebreak(weak: true) }
+    // Scoped to this loop iteration, so each game's pages carry that game's
+    // own running header (the per-game `set page` also guarantees the game
+    // starts on a fresh page).
+    set page(header: if ttl == none { none } else { context [
+      #set text(font: header-font, style: "italic", size: 9.5pt)
+      #grid(columns: (1fr, auto), ttl, align(right)[#counter(page).display()])
+      #v(-2pt)
+      #line(length: 100%, stroke: 0.4pt + luma(120))
+    ] })
+
+    if ttl != none or sub != none {
+      align(center)[
+        #if ttl != none { text(size: 18pt, weight: "bold", ttl) }
+        #if ttl != none and sub != none { v(0.2em) }
+        #if sub != none { text(size: 12pt, style: "italic", sub) }
+      ]
+      v(1em)
+    }
+
+    let nodes = movetext(g)
+    let diagram-points = _diagram-points(nodes)
+
+    // A PGN comment BEFORE the very first move (e.g. an introductory note) is
+    // carried as the first node's `comment-before` -- `notation()` never
+    // renders that field (only `comment-after`), so it needs printing by hand.
+    let intro = nodes.first().at("comment-before", default: none)
+    if intro != none {
+      [#intro.trim()]
       parbreak()
-      if info.has-prose {
-        [#info.prose]
+    }
+
+    let run-start = 0
+    for (i, node) in nodes.enumerate() {
+      let loc = loc-of(i)
+      let info = _comment-info(node)
+      let is-last = i == nodes.len() - 1
+      // Pure marker-driven placement when the game carries any; otherwise
+      // automatic placement at heavily-annotated moves or fixed intervals
+      // (see `_diagram-points`), always including the final position.
+      let is-diagram-point = diagram-points.contains(i)
+      if info.has-prose or info.has-marker or is-last or is-diagram-point {
+        // `comments: true` is needed so prose nested INSIDE a variation still
+        // renders -- not just this run's own trailing comment. But staunton's
+        // `_move-token` concatenates a MAINLINE move's own trailing comment
+        // into the same string as the move before `strong()` wraps it, so
+        // printing it through `comments: true` here would bold the prose (and
+        // the marker) along with the move -- variations dodge this because
+        // they always render through a separate `bold: false` call. Blank out
+        // just this run's own ending comment before rendering (nested-variation
+        // comments elsewhere in the range are untouched), then print the
+        // cleaned, marker-stripped text as its own ordinary-weight paragraph.
+        let notation-source = if info.has-prose or info.has-marker {
+          let overrides = (:)
+          overrides.insert(loc, "")
+          with-comments(g, comments: overrides)
+        } else { g }
+        notation(
+          notation-source, from: loc-of(run-start), to: loc,
+          figurine: true, nags: true, variations: true, comments: true, spaced: false,
+          result: is-last,
+        )
         parbreak()
+        if info.has-prose {
+          [#info.prose]
+          parbreak()
+        }
+        if is-diagram-point {
+          align(center, with-marker(board(g, at: loc)))
+          v(2pt)
+        }
+        run-start = i + 1
       }
-      if is-diagram-point {
-        align(center, with-marker(board(g, at: loc)))
-        v(2pt)
-      }
-      run-start = i + 1
     }
   }
 }
