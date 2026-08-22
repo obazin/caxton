@@ -13,18 +13,30 @@ Sources
   (MIT AND GPL-2.0-or-later -- see `LICENSE` and `LICENSE-PIECES` in this
   directory, copied unchanged from upstream).
 - Fork: `staunton-fork` (local, sibling project to caxton), commit
-  `3d641227a34181bc987325db08aeedac3855f5b9`. The one change from upstream:
-  `src/game.typ`'s `_mainline-positions` (standard-chess games only) now
-  resolves a game's mainline through a bundled WASM plugin instead of a
-  pure-Typst move generator -- see the commit message on that fork for the
-  full rationale and the correctness work (matching the original engine's
-  en-passant semantics and error wording exactly; verified against the
-  fork's own 218-test suite and a byte-for-byte identical real-document
-  benchmark before and after).
+  `f7ce88167d55a75d01089a4552a00fce4286a688` (branch `shakmaty-engine`). Two
+  changes from upstream, both performance, both output-preserving:
+  1. `src/game.typ`'s `_mainline-positions` (standard-chess games only)
+     resolves a game's mainline through a bundled WASM plugin instead of a
+     pure-Typst move generator (fork commit `3d641227` -- see its message
+     for the rationale and correctness work: matching the original engine's
+     en-passant semantics and error wording exactly; verified against the
+     fork's own 218-test suite and a byte-for-byte identical real-document
+     benchmark before and after).
+  2. The interpreted hot paths left downstream of that plugin cut (fork
+     commit `f7ce8816`): the plugin's per-ply resolved-move fields replace
+     the per-diagram pure-Typst `legal-moves()` walk, mainline positions
+     parse lazily (one `parse-fen` per addressed ply, not all N+1), and the
+     hottest helpers drop per-call regex construction / eager assert
+     messages (fen.typ, coords.typ, pieces.typ, annotations.typ, i18n.typ,
+     pgn.typ). Verified against the same 218-test suite and pixel-identical
+     rendering of the fork's real-document benchmark and showcase.
 - Plugin: `typst-shakmaty-engine` (local, sibling project to caxton) --
   the Rust source `src/assets/engine/shakmaty.wasm` is built from, wrapping
   the `shakmaty` crate (GPL-3.0-or-later) as a Typst WASM plugin. See that
-  project's own README for its protocol and build instructions.
+  project's own README for its protocol and build instructions. The bundled
+  binary is that project's commit `24bee7e` (resolved-move fields in the
+  output; built at `opt-level = 3` -- Typst executes plugins under the
+  wasmi interpreter, where size-optimized builds run several times slower).
 
 License status: UNRESOLVED, flagged deliberately
 -------------------------------------------------

@@ -60,8 +60,12 @@
 // `interpret-comment`. This module only needs its own copy because it
 // prints one comment -- the run's own trailing one -- itself, outside
 // `notation()`, to keep it out of the bolded mainline text.
+// Hoisted: `_strip-marker` runs for every commented mainline node (via
+// `_comment-info`), and Typst compiles a `regex(..)` literal on every
+// evaluation -- same lesson as staunton's own hoisted token regexes.
+#let _cal-csl-re = regex("\[%(cal|csl)[^\[\]]*\]")
 #let _strip-marker(raw) = {
-  let text = raw.replace(regex("\[%(cal|csl)[^\[\]]*\]"), "")
+  let text = raw.replace(_cal-csl-re, "")
   let has-bracket = text.contains("[#]")
   let has-leading = text.trim().starts-with("#")
   if has-bracket { text = text.replace("[#]", "") }
@@ -125,20 +129,23 @@
 #let _plain-interval = 16  // plies between fixed-interval diagrams
 
 // -> array of 0-based mainline node indexes after which to draw a diagram.
-#let _diagram-points(nodes, start) = {
-  let marked = range(nodes.len()).filter(i => _comment-info(nodes.at(i)).has-marker)
+// `infos` is the per-node `_comment-info` array, computed ONCE by the caller
+// and shared with the render loop -- three separate full passes re-deriving
+// it (markers, heavy prose, rendering) was measurable on long games.
+#let _diagram-points(infos, start) = {
+  let marked = range(infos.len()).filter(i => infos.at(i).has-marker)
   if marked.len() > 0 { return marked }
-  let heavy = range(nodes.len()).filter(i => (
-    _comment-info(nodes.at(i)).prose.len() >= _heavy-prose-chars
+  let heavy = range(infos.len()).filter(i => (
+    infos.at(i).prose.len() >= _heavy-prose-chars
     and _full-move-of-index(i, start) > _heavy-prose-min-move
   ))
-  let interval = range(nodes.len()).filter(i => calc.rem(i + 1, _plain-interval) == 0)
+  let interval = range(infos.len()).filter(i => calc.rem(i + 1, _plain-interval) == 0)
   let candidates = (heavy + interval).dedup().sorted()
   let pts = ()
   for i in candidates {
     if pts.len() == 0 or i - pts.last() >= _min-diagram-gap { pts.push(i) }
   }
-  let last = nodes.len() - 1
+  let last = infos.len() - 1
   if pts.len() > 0 and pts.last() != last and last - pts.last() < _min-diagram-gap {
     let _ = pts.pop()
   }
@@ -157,10 +164,11 @@
   else { none }
 }
 
+#let _year-re = regex("^(\d{4})")
 #let _year-of(g) = {
   let d = g.tags.at("Date", default: none)
   if d == none { return none }
-  let m = d.match(regex("^(\d{4})"))
+  let m = d.match(_year-re)
   if m != none { m.captures.at(0) } else { none }
 }
 
@@ -180,8 +188,12 @@
 // Brace-comment state is tracked across lines so a hard-wrapped comment line
 // that happens to start with `[` is never mistaken for a new tag section
 // (PGN `{}` comments don't nest; `;` comments run to end of line).
+#let _tag-rest-re = regex("^[A-Za-z0-9_]+\s*\"")
+// The three characters that drive the comment-state machine below. Scanning a
+// line for just these via one native regex pass (usually zero matches) beats
+// an interpreted per-character `.clusters()` walk over the entire file.
+#let _comment-delims-re = regex("[{};]")
 #let _split-games(text) = {
-  let tag-rest = regex("^[A-Za-z0-9_]+\s*\"")
   let games = ()
   let current = ()
   let in-comment = false
@@ -189,7 +201,7 @@
   for line in text.split("\n") {
     let stripped = line.trim()
     if not in-comment and stripped != "" {
-      let is-tag = stripped.starts-with("[") and stripped.slice(1).trim().match(tag-rest) != none
+      let is-tag = stripped.starts-with("[") and stripped.slice(1).trim().match(_tag-rest-re) != none
       if is-tag and seen-movetext {
         games.push(current.join("\n"))
         current = ()
@@ -199,7 +211,8 @@
       }
     }
     current.push(line)
-    for c in line.clusters() {
+    for m in line.matches(_comment-delims-re) {
+      let c = m.text
       if in-comment {
         if c == "}" { in-comment = false }
       } else {
@@ -231,9 +244,11 @@
 // to `game()` -- this clears mainline comments, comments nested inside
 // variations, and the pre-first-move intro comment all in one pass, rather
 // than requiring every downstream reader to know about it.
+#let _eval-clk-re = regex("\[%(eval|clk)[^\[\]]*\]")
 #let _strip-pgn-commands(text) = {
-  text.replace(regex("\[%(eval|clk)[^\[\]]*\]"), "")
+  text.replace(_eval-clk-re, "")
 }
+#let _ws-re = regex("\s+")
 
 /// Typeset one or more annotated PGN games as print-ready book pages.
 ///
@@ -343,7 +358,7 @@
     // source file's column width -- decides where lines actually break. The
     // whitespace collapse also mops up any doubled-up spaces left behind
     // where a command annotation was removed.
-    let g = game(_strip-pgn-commands(game-text).replace(regex("\s+"), " "))
+    let g = game(_strip-pgn-commands(game-text).replace(_ws-re, " "))
     let start = game-start(g)
     let loc-of(i) = _locator-of-index(i, start)
 
@@ -371,7 +386,16 @@
     }
 
     let nodes = movetext(g)
-    let diagram-points = _diagram-points(nodes, start)
+    // One `_comment-info` pass, shared by diagram placement (its two filters)
+    // and the render loop below; membership in `diagram-points` as a flat
+    // boolean array rather than a per-node `.contains(..)` scan.
+    let infos = nodes.map(_comment-info)
+    let diagram-points = _diagram-points(infos, start)
+    let is-diagram-point-at = {
+      let flags = range(nodes.len()).map(_ => false)
+      for p in diagram-points { flags.at(p) = true }
+      flags
+    }
 
     // The movetext itself -- collected into one content value so it can be
     // handed to `std.columns(..)` below, rather than flowing straight into
@@ -388,15 +412,27 @@
         parbreak()
       }
 
+      // Every run-ending comment blanked in ONE derived game, instead of a
+      // fresh full-size patched game dict per commented run: a node with
+      // prose/marker is by construction the LAST node of its own run, so each
+      // notation slice below sees exactly its own ending comment blanked and
+      // nobody else's -- same rendering, but all runs now share a single
+      // source dict (one `with-comments` call, one memo key).
+      let overrides = (:)
+      for (i, info) in infos.enumerate() {
+        if info.has-prose or info.has-marker { overrides.insert(loc-of(i), "") }
+      }
+      let clean-g = if overrides.len() > 0 { with-comments(g, comments: overrides) } else { g }
+
       let run-start = 0
       for (i, node) in nodes.enumerate() {
         let loc = loc-of(i)
-        let info = _comment-info(node)
+        let info = infos.at(i)
         let is-last = i == nodes.len() - 1
         // Pure marker-driven placement when the game carries any; otherwise
         // automatic placement at heavily-annotated moves or fixed intervals
         // (see `_diagram-points`), always including the final position.
-        let is-diagram-point = diagram-points.contains(i)
+        let is-diagram-point = is-diagram-point-at.at(i)
         if info.has-prose or info.has-marker or is-last or is-diagram-point {
           // `comments: true` is needed so prose nested INSIDE a variation still
           // renders -- not just this run's own trailing comment. But staunton's
@@ -404,17 +440,13 @@
           // into the same string as the move before `strong()` wraps it, so
           // printing it through `comments: true` here would bold the prose (and
           // the marker) along with the move -- variations dodge this because
-          // they always render through a separate `bold: false` call. Blank out
-          // just this run's own ending comment before rendering (nested-variation
-          // comments elsewhere in the range are untouched), then print the
-          // cleaned, marker-stripped text as its own ordinary-weight paragraph.
-          let notation-source = if info.has-prose or info.has-marker {
-            let overrides = (:)
-            overrides.insert(loc, "")
-            with-comments(g, comments: overrides)
-          } else { g }
+          // they always render through a separate `bold: false` call. Render
+          // from `clean-g` (built above), where every run-ending comment is
+          // blanked (nested-variation comments elsewhere in the range are
+          // untouched), then print the cleaned, marker-stripped text as its
+          // own ordinary-weight paragraph.
           notation(
-            notation-source, from: loc-of(run-start), to: loc,
+            clean-g, from: loc-of(run-start), to: loc,
             figurine: true, nags: true, variations: true, comments: true, spaced: false,
             result: is-last,
           )

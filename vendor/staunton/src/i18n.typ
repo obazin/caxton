@@ -111,16 +111,18 @@
 /// - lang (str): the source language code (must be a key of `notation-langs`).
 /// -> str
 #let normalize-san(san, lang) = {
-  assert(
-    notation-langs.keys().contains(lang),
-    message: "unknown language code \"" + lang + "\"; supported: " + notation-langs.keys().join(", "),
-  )
+  // Lazy panic (not eager `assert(message:)`) and `in`-membership (not a
+  // fresh `.keys()` array per call): this runs for every SAN token of every
+  // parsed game, almost always passing.
+  if lang not in notation-langs {
+    panic("unknown language code \"" + lang + "\"; supported: " + notation-langs.keys().join(", "))
+  }
 
   let s = san
   let cs = s.clusters()
 
   // Leading figurine glyph: language-neutral, terminal (see docstring).
-  let leading-is-figurine = cs.len() > 0 and _figurine-glyphs.keys().contains(cs.at(0))
+  let leading-is-figurine = cs.len() > 0 and cs.at(0) in _figurine-glyphs
   if leading-is-figurine {
     s = _figurine-glyphs.at(cs.at(0)) + cs.slice(1).join("")
   }
@@ -131,7 +133,7 @@
     let parts = s.split("=")
     if parts.len() == 2 and parts.at(1).len() > 0 {
       let pc = parts.at(1).clusters()
-      if _figurine-glyphs.keys().contains(pc.at(0)) {
+      if pc.at(0) in _figurine-glyphs {
         s = parts.at(0) + "=" + _figurine-glyphs.at(pc.at(0)) + pc.slice(1).join("")
       }
     }

@@ -245,6 +245,12 @@
   ))
 }
 
+// Any Unicode chess figurine glyph (either colour set) -- one native scan of
+// the raw movetext decides whether an "en" game needs SAN normalization at
+// all, sparing the per-token pass AND the full tree rebuild it implies for
+// the overwhelmingly common figurine-free English case.
+#let _figurine-glyph-re = regex("[\u{2654}-\u{265F}]")
+
 /// The parsed movetext tree (an array of move nodes) of a game — the mainline
 /// spine with recursive `variations`. Built on demand from the game's raw
 /// movetext and memoised, so deeper structure errors (e.g. a `(` without a
@@ -259,9 +265,14 @@
   // `with-line`, game.typ) carries a precomputed node tree (already in
   // canonical English SAN); honour it so the change flows through every consumer
   // (notation, _position-after, ...). Unpatched games build (and memoise) from the
-  // raw text, then normalize.
+  // raw text, then normalize -- except English games with no figurine glyphs
+  // anywhere, whose tokens `normalize-san` would return unchanged: skip the
+  // rebuild outright.
   let pre = game.at("movetext-nodes", default: none)
-  if pre != none { pre } else { _normalize-nodes(_movetext-tree(game.movetext-raw), game.lang) }
+  if pre != none { return pre }
+  let tree = _movetext-tree(game.movetext-raw)
+  if game.lang == "en" and not game.movetext-raw.contains(_figurine-glyph-re) { return tree }
+  _normalize-nodes(tree, game.lang)
 }
 
 // ---- normalise input (string or raw block) -------------------------------

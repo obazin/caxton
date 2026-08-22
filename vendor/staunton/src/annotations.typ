@@ -45,6 +45,19 @@
 }
 
 // ---- comment interpretation -----------------------------------------------
+// All of interpret-comment's regexes, hoisted to module level: it runs once
+// per commented node per notation render plus once per diagram, and compiling
+// its ~8 regexes per call was measurable (same lesson as pgn.typ's hoisted
+// token regexes).
+#let _cal-re = regex("\[%cal\s+([^\]]+)\]")
+#let _csl-re = regex("\[%csl\s+([^\]]+)\]")
+#let _cb-marker-re = regex("#(\[([^\]]*)\])?")
+#let _scid-marker-re = regex("\[[dD]\]")
+#let _strip-cal-re = regex("\[%cal\s+[^\]]+\]")
+#let _strip-csl-re = regex("\[%csl\s+[^\]]+\]")
+#let _strip-cb-re = regex("#(\[[^\]]*\])?")
+#let _ws-collapse-re = regex("\s+")
+
 /// Interpret a PGN move comment: extract a diagram marker, `%cal` arrows, `%csl`
 /// highlights, and the remaining prose. Returns `(diagram, arrows, highlights,
 /// text)`.
@@ -59,7 +72,7 @@
 
   // %cal arrows: tokens are <Color><from><to>, e.g. "Gf3e5".
   let arrows = ()
-  let mcal = c.match(regex("\[%cal\s+([^\]]+)\]"))
+  let mcal = c.match(_cal-re)
   if mcal != none {
     for tok in mcal.captures.at(0).split(",") {
       let t = tok.trim()
@@ -68,7 +81,7 @@
   }
   // %csl highlights: tokens are <Color><square>, e.g. "Re5".
   let highlights = ()
-  let mcsl = c.match(regex("\[%csl\s+([^\]]+)\]"))
+  let mcsl = c.match(_csl-re)
   if mcsl != none {
     for tok in mcsl.captures.at(0).split(",") {
       let t = tok.trim()
@@ -79,10 +92,10 @@
   // diagram marker. ChessBase "#" (optionally "#[caption]") first; then the
   // bracketed Scid form and the literal LaTeX / Markdown forms.
   let diagram = none
-  let mcb = c.match(regex("#(\[([^\]]*)\])?"))
+  let mcb = c.match(_cb-marker-re)
   if mcb != none {
     diagram = (caption: mcb.captures.at(1))
-  } else if c.match(regex("\[[dD]\]")) != none {
+  } else if c.match(_scid-marker-re) != none {
     diagram = (caption: none)
   } else if c.contains("\\diagram") {
     diagram = (caption: none)
@@ -92,13 +105,13 @@
 
   // residual prose: strip every command/marker, collapse whitespace.
   let text = c
-  text = text.replace(regex("\[%cal\s+[^\]]+\]"), "")
-  text = text.replace(regex("\[%csl\s+[^\]]+\]"), "")
-  text = text.replace(regex("#(\[[^\]]*\])?"), "")
-  text = text.replace(regex("\[[dD]\]"), "")
+  text = text.replace(_strip-cal-re, "")
+  text = text.replace(_strip-csl-re, "")
+  text = text.replace(_strip-cb-re, "")
+  text = text.replace(_scid-marker-re, "")
   text = text.replace("\\diagram", "")
   text = text.replace("%%diagram", "")
-  text = text.replace(regex("\s+"), " ").trim()
+  text = text.replace(_ws-collapse-re, " ").trim()
 
   (diagram: diagram, arrows: arrows, highlights: highlights, text: text)
 }

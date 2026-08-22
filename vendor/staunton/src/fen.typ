@@ -23,7 +23,7 @@
 // for drawing; the rest is carried for later move-generation / display).
 // ===========================================================================
 
-#import "coords.typ": square-name, parse-square, file-letter
+#import "coords.typ": square-name, parse-square, file-letter, _square-index
 #import "pieces.typ": fen-piece, kind-letters
 
 // ---- castling helpers (rook-file model) -----------------------------------
@@ -33,11 +33,13 @@
 // The `king`/`queen` key still names the SIDE (king-side = rook on the h-side of
 // the king; queen-side = a-side).
 
-// (col, row) of `color`'s king in a squares dict, or `none`.
+// (col, row) of `color`'s king in a squares dict, or `none`. The dict's keys
+// are engine-produced square names (from `square-name`/`parse-fen`), so the
+// trusted `_square-index` fast path applies -- no per-name regex/validation.
 #let _find-king-cr(board, color) = {
   for (name, p) in board {
     if p.kind == "king" and p.color == color {
-      let s = parse-square(name)
+      let s = _square-index(name)
       return (s.col, s.row)
     }
   }
@@ -49,7 +51,7 @@
   let cols = ()
   for (name, p) in board {
     if p.kind == "rook" and p.color == color {
-      let s = parse-square(name)
+      let s = _square-index(name)
       if s.row == row { cols.push(s.col) }
     }
   }
@@ -148,9 +150,18 @@
 /// - fen (str): a FEN record, e.g.
 ///   `"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"`.
 /// -> dictionary
+// parse-fen inner-loop lookups, hoisted to module level: this function runs
+// once per position a document actually reads, and its placement loop visits
+// up to 64 cells -- constructing a regex or a square-name string per cell was
+// a measured hot spot (same lesson as pgn.typ's hoisted token regexes).
+#let _fen-digits = ("1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8)
+// Row-major precomputed square names: _fen-sq-names.at(row * 8 + col).
+#let _fen-sq-names = range(8).map(r => range(8).map(c => square-name(c, r))).flatten()
+#let _fen-ws-re = regex("\s+")
+
 #let parse-fen(fen) = {
-  assert(type(fen) == str, message: "FEN must be a string, got: " + repr(fen))
-  let parts = fen.trim().split(regex("\s+")).filter(p => p != "")
+  if type(fen) != str { panic("FEN must be a string, got: " + repr(fen)) }
+  let parts = fen.trim().split(_fen-ws-re).filter(p => p != "")
   assert(parts.len() >= 1, message: "empty FEN string")
 
   // ---- field 1: piece placement -----------------------------------------
@@ -166,15 +177,16 @@
     let row = rank-num - 1
     let col = 0
     for ch in rank-str.clusters() {
-      if ch.match(regex("^[1-8]$")) != none {
-        col += int(ch)
+      let run = _fen-digits.at(ch, default: none)
+      if run != none {
+        col += run
       } else {
-        assert(col < 8, message: "rank " + str(rank-num) + " overflows 8 files: " + rank-str)
-        board.insert(square-name(col, row), fen-piece(ch))
+        if col >= 8 { panic("rank " + str(rank-num) + " overflows 8 files: " + rank-str) }
+        board.insert(_fen-sq-names.at(row * 8 + col), fen-piece(ch))
         col += 1
       }
     }
-    assert(col == 8, message: "rank " + str(rank-num) + " does not fill 8 files (got " + str(col) + "): " + rank-str)
+    if col != 8 { panic("rank " + str(rank-num) + " does not fill 8 files (got " + str(col) + "): " + rank-str) }
   }
 
   // ---- fields 2-6: optional, with defaults ------------------------------

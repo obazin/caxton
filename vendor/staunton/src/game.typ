@@ -118,17 +118,28 @@
 // package's own X-FEN convention for this first integration.
 #let _engine-plugin = plugin("assets/engine/shakmaty.wasm")
 
-// One plugin call for a whole game: starting FEN + ordered SAN list in,
-// position dicts out (index 0 the starting position) -- by construction the
-// SAME shape `parse-fen`/`apply` already produce, since each entry is just
-// the plugin's returned FEN re-parsed through this package's OWN `parse-fen`.
+// One plugin call for a whole game: starting FEN + ordered SAN list in, raw
+// per-ply entries out (index 0 the starting position). Each entry carries the
+// resulting FEN plus the resolved move's own fields (from/to/piece/color/
+// capture-kind/kind/promotion, in this package's move-dict vocabulary) -- see
+// the plugin README's protocol section. Typst memoises the plugin call by its
+// argument bytes, so the wasm runs once per game however many times this is
+// invoked; the entries stay RAW here (no parse-fen) so consumers can pay for
+// exactly the positions they actually read -- see `_position-after`.
 // An illegal/ambiguous/malformed SAN token surfaces as a plugin error, which
 // Typst reports as a compile error naming the offending ply and token (the
 // same hard-error semantics `san-to-move` itself has).
-#let _plugin-mainline-positions(game) = {
+#let _plugin-entries(game) = {
   let input = cbor.encode((fen: position-fen(game-start(game)), moves: mainline(game)))
-  let out = cbor(_engine-plugin.positions(input))
-  out.map(entry => parse-fen(entry.fen))
+  cbor(_engine-plugin.positions(input))
+}
+
+// All plugin entries re-parsed into position dicts -- by construction the SAME
+// shape `parse-fen`/`apply` already produce. Only for callers that genuinely
+// need every position; anything addressing a single ply should go through
+// `_plugin-entries` + one `parse-fen` instead of materialising all N+1.
+#let _plugin-mainline-positions(game) = {
+  _plugin-entries(game).map(entry => parse-fen(entry.fen))
 }
 
 // All mainline positions: (start, after ply 1, after ply 2, ...). Each SAN is
@@ -173,11 +184,19 @@
   let loc = if type(locator) == str { (line: (), at: locator) } else { locator }
   let start = game-start(game)
 
-  // Fast path: a pure mainline locator just indexes into the (memoised) mainline
-  // positions -- no re-walking, no extra generator runs across diagrams.
+  // Fast path: a pure mainline locator addresses ONE position, so for
+  // standard-chess games parse just that entry's FEN instead of materialising
+  // all N+1 positions (a K-diagram document reads K of them; the rest was
+  // pure waste). The plugin call itself is memoised, so this stays one wasm
+  // run per game however many diagrams index into it.
   if loc.at("line", default: ()).len() == 0 {
-    let all = _mainline-positions(game)
     let target = _ply-of(loc.at("at"), start: start)
+    if game-variant(game) == "standard" {
+      let entries = _plugin-entries(game)
+      assert(target >= 0 and target < entries.len(), message: "locator out of range: addressed move past end of line")
+      return parse-fen(entries.at(target).fen)
+    }
+    let all = _mainline-positions(game)
     assert(target >= 0 and target < all.len(), message: "locator out of range: addressed move past end of line")
     return all.at(target)
   }
@@ -249,8 +268,23 @@
   let start = game-start(game)
   let before = none
   let san = none
-  // Mainline fast path: the position before ply p is the (memoised) position at
-  // ply p-1; the SAN is that node's.
+  // Mainline fast path, standard chess: the plugin already resolved every
+  // mainline SAN, so the move dict is a plain field copy off its entry -- no
+  // san-to-move, no legal-moves() run per diagram (the single largest
+  // interpreted cost this plugin exists to remove).
+  if loc.at("line", default: ()).len() == 0 and game-variant(game) == "standard" {
+    let entries = _plugin-entries(game)
+    let target = _ply-of(loc.at("at"), start: start)
+    assert(target >= 1 and target < entries.len(), message: "move-destination: locator out of range")
+    let e = entries.at(target)
+    return (
+      from: e.from, to: e.to, piece: e.piece, color: e.color,
+      capture: e.at("capture-kind", default: none), kind: e.kind,
+      promotion: e.at("promotion", default: none),
+    )
+  }
+  // Mainline fast path (non-standard variants): the position before ply p is
+  // the (memoised) position at ply p-1; the SAN is that node's.
   if loc.at("line", default: ()).len() == 0 {
     let all = _mainline-positions(game)
     let target = _ply-of(loc.at("at"), start: start)

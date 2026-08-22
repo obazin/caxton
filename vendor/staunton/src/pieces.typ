@@ -91,11 +91,21 @@
 ///
 /// - letter (str): a one-character FEN piece letter.
 /// -> dictionary
+// Both cases precomputed once at module level: this runs for every piece of
+// every parsed position, so rebuilding the kinds dict (and its keys array for
+// the membership test) per call was measurable.
+#let _fen-piece-table = {
+  let t = (:)
+  for (k, kind) in (p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king") {
+    t.insert(k, (kind: kind, color: "black"))
+    t.insert(upper(k), (kind: kind, color: "white"))
+  }
+  t
+}
 #let fen-piece(letter) = {
-  let kinds = (p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king")
-  let key = lower(letter)
-  assert(kinds.keys().contains(key), message: "invalid FEN piece letter: \"" + letter + "\"")
-  (kind: kinds.at(key), color: if letter == upper(letter) { "white" } else { "black" })
+  let p = _fen-piece-table.at(letter, default: none)
+  if p == none { panic("invalid FEN piece letter: \"" + letter + "\"") }
+  p
 }
 
 /// Resolve the fallback glyph for a piece `kind`: a caller/variant-supplied glyph

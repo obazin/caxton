@@ -32,7 +32,9 @@
 /// - col (int): the column index (0–25).
 /// -> str
 #let file-letter(col) = {
-  assert(0 <= col and col < _file-alphabet.len(), message: "col out of range 0.." + str(_file-alphabet.len() - 1) + ": " + repr(col))
+  // Not `assert(..)`: its `message:` argument is evaluated EAGERLY, and this
+  // runs for every square-name a position or board probe builds.
+  if col < 0 or col >= _file-alphabet.len() { panic("col out of range 0.." + str(_file-alphabet.len() - 1) + ": " + repr(col)) }
   _file-alphabet.at(col)
 }
 
@@ -44,15 +46,19 @@
 /// - cols (int): board width (default `8`).
 /// - rows (int): board height (default `8`).
 /// -> dictionary
+#let _square-re = regex("^([a-z])([0-9]+)$")
 #let parse-square(square, cols: 8, rows: 8) = {
-  assert(type(square) == str, message: "square must be a string like \"e4\", got: " + repr(square))
+  // Lazy error strings (`if .. { panic(..) }`, not eager `assert(message:)`)
+  // and a hoisted regex: user-facing validation stays, its cost per passing
+  // call doesn't.
+  if type(square) != str { panic("square must be a string like \"e4\", got: " + repr(square)) }
   let s = lower(square).trim()
-  let m = s.match(regex("^([a-z])([0-9]+)$"))
-  assert(m != none, message: "invalid square name \"" + square + "\" (expected a file letter then a rank number, e.g. \"e4\")")
+  let m = s.match(_square-re)
+  if m == none { panic("invalid square name \"" + square + "\" (expected a file letter then a rank number, e.g. \"e4\")") }
   let col = _file-alphabet.position(c => c == m.captures.at(0))
   let row = int(m.captures.at(1)) - 1
-  assert(col != none and col < cols, message: "file out of range in \"" + square + "\" (board has " + str(cols) + " files)")
-  assert(0 <= row and row < rows, message: "rank out of range in \"" + square + "\" (board has " + str(rows) + " ranks)")
+  if col == none or col >= cols { panic("file out of range in \"" + square + "\" (board has " + str(cols) + " files)") }
+  if row < 0 or row >= rows { panic("rank out of range in \"" + square + "\" (board has " + str(rows) + " ranks)") }
   (col: col, row: row)
 }
 
@@ -78,7 +84,9 @@
 /// - row (int): zero-based row index.
 /// -> str
 #let square-name(col, row) = {
-  assert(0 <= row, message: "row must be >= 0: " + repr(row))
+  // Not `assert(..)`: eager `message:` evaluation was measurably hot -- the
+  // engine's `_at` builds a square name for every board probe.
+  if row < 0 { panic("row must be >= 0: " + repr(row)) }
   file-letter(col) + str(row + 1)
 }
 
@@ -120,8 +128,14 @@
 
 // The absolute-scale ply of a game's very first recorded move, given its
 // `start` -- e.g. a FEN starting "b ... 12" (Black to move, move 12) has its
-// first move at raw ply 24.
-#let _start-ply(start) = _raw-ply-of-locator(str(start.fullmove) + start.turn)
+// first move at raw ply 24. Direct arithmetic on the start dict: this runs
+// per rendered move (via `_movenum-of-ply` / `_ply-is-white`), so no
+// build-a-locator-string-then-reparse-it round trip.
+#let _start-ply(start) = {
+  if start.turn == "w" { 2 * start.fullmove - 1 }
+  else if start.turn == "b" { 2 * start.fullmove }
+  else { panic("move locator must end in 'w' or 'b': " + str(start.fullmove) + start.turn) }
+}
 
 // A PGN-numbered locator ("30w"/"30b", using the game's OWN numbering) -> the
 // LOCAL 1-based ply -- i.e. position within the game's own recorded move list,
