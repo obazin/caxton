@@ -38,10 +38,20 @@
 // Strip a diagram marker from a raw comment string, returning whether one was
 // found and the remaining prose (trimmed). Two independent forms, per the
 // module doc comment above; either (or both) may be present.
+//
+// `%cal`/`%csl` (arrows / highlighted squares) are also stripped from the
+// prose here -- but only here, for what THIS module prints and measures.
+// They stay untouched in the underlying game (`board(g, at: loc, ...)` reads
+// straight from it), so they still draw on the diagram; `staunton`'s own
+// `notation(..., comments: true)` likewise cleans them from any OTHER
+// comment it renders (nested-variation prose) via its own
+// `interpret-comment`. This module only needs its own copy because it
+// prints one comment -- the run's own trailing one -- itself, outside
+// `notation()`, to keep it out of the bolded mainline text.
 #let _strip-marker(raw) = {
-  let has-bracket = raw.contains("[#]")
-  let has-leading = raw.trim().starts-with("#")
-  let text = raw
+  let text = raw.replace(regex("\[%(cal|csl)[^\[\]]*\]"), "")
+  let has-bracket = text.contains("[#]")
+  let has-leading = text.trim().starts-with("#")
   if has-bracket { text = text.replace("[#]", "") }
   text = text.trim()
   if has-leading and text.starts-with("#") { text = text.slice(1) }
@@ -168,13 +178,42 @@
   games.filter(g => g.trim() != "")
 }
 
+// ---- PGN command annotations -----------------------------------------------
+
+// Chess GUIs and servers (lichess, chess.com, ChessBase, Scid, ...) embed
+// machine-readable annotations directly inside `{}` comments, using the PGN
+// "command" syntax `[%name args]`. Two of these are pure engine/clock
+// telemetry with no meaning for a printed book -- `[%eval 0.09]` (or
+// `[%eval #3]` for a mate score) and `[%clk 0:08:53]` -- and must never
+// appear in rendered prose, nor feed into any decision meant for
+// human-authored text: the "heavily annotated move" heuristic below, or
+// `[#]`/leading-`#` diagram-marker detection (a raw comment of just
+// `{[%eval #3]}` must not be mistaken for a `#`-led Scid diagram marker).
+// Only these two are stripped, deliberately by name rather than by the
+// generic `[%...]` shape -- `%cal` (arrows) and `%csl` (highlighted
+// squares) are graphical annotations that `staunton` itself parses out of
+// the same raw comment text to draw on the board (see its
+// `interpret-comment`), so removing them here would silently kill that
+// rendering. Stripped once, from each game's raw text, before it's handed
+// to `game()` -- this clears mainline comments, comments nested inside
+// variations, and the pre-first-move intro comment all in one pass, rather
+// than requiring every downstream reader to know about it.
+#let _strip-pgn-commands(text) = {
+  text.replace(regex("\[%(eval|clk)[^\[\]]*\]"), "")
+}
+
 /// Typeset one or more annotated PGN games as print-ready book pages.
 ///
 /// - pgn (str, content): the raw PGN text (a string, or a ```` ```raw block ````).
 ///   May contain several games back to back (the usual multi-game PGN file
-///   layout); each game starts on a fresh page. Hard-wrapped comment newlines
-///   are collapsed to spaces before parsing, so a PGN wrapped at a fixed
-///   column doesn't force mid-sentence line breaks.
+///   layout); each game starts on a fresh page. Engine/clock PGN command
+///   annotations inside comments (`[%eval ..]`, `[%clk ..]` -- written by
+///   lichess, chess.com and similar tools) are stripped before parsing, so
+///   they never appear in rendered prose and never affect diagram placement;
+///   `[%cal ..]`/`[%csl ..]` (arrows / highlighted squares) are left alone
+///   and still render on the diagrams as `staunton` supports. Hard-wrapped
+///   comment newlines are collapsed to spaces before parsing, so a PGN
+///   wrapped at a fixed column doesn't force mid-sentence line breaks.
 /// - title (auto, content, none): page header / title line. `auto` reads
 ///   "White -- Black" from each game's own tags; `none` omits it. An explicit
 ///   value applies to every game in the PGN.
@@ -260,10 +299,13 @@
   ]
 
   for (game-index, game-text) in games.enumerate() {
-    // Hard-wrapped comment newlines (common in exported/book PGNs) become
-    // plain spaces before parsing, so justification -- not the source file's
-    // column width -- decides where lines actually break.
-    let g = game(game-text.replace(regex("\s+"), " "))
+    // PGN command annotations (`[%eval ..]`, `[%clk ..]`, ...) are stripped
+    // first, then hard-wrapped comment newlines (common in exported/book
+    // PGNs) become plain spaces before parsing, so justification -- not the
+    // source file's column width -- decides where lines actually break. The
+    // whitespace collapse also mops up any doubled-up spaces left behind
+    // where a command annotation was removed.
+    let g = game(_strip-pgn-commands(game-text).replace(regex("\s+"), " "))
     let start = game-start(g)
     let loc-of(i) = _locator-of-index(i, start)
 
@@ -338,7 +380,10 @@
           parbreak()
         }
         if is-diagram-point {
-          align(center, with-marker(board(g, at: loc)))
+          // `annotations: true` turns on staunton's own `%cal`/`%csl`
+          // processing (off by default) so a move's arrows / highlighted
+          // squares draw on its diagram, same as real chess software.
+          align(center, with-marker(board(g, at: loc, annotations: true)))
           v(2pt)
         }
         run-start = i + 1
