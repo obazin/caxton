@@ -17,9 +17,10 @@
 //   - a comment that STARTS with `#`     (Scid's own documented rule)
 // The marker is stripped before the surrounding comment is printed as prose.
 // If a game carries no markers at all, diagrams are placed automatically:
-// after heavily-annotated mainline moves (with a minimum spacing between
-// diagrams), or at a fixed move interval when the game has no comments at
-// all -- and always at the final position, so output is never diagram-less.
+// after heavily-annotated mainline moves past the opening (with a minimum
+// spacing between diagrams), or at a fixed move interval when the game has
+// no comments at all -- and always at the final position, so output is
+// never diagram-less.
 //
 // (staunton's `notation(diagrams: true)` recognises a bare `#`, an
 // `#[caption]` form, and `[d]`/`[D]`, plus `\diagram`/`%%diagram` -- of these,
@@ -68,25 +69,53 @@
   (has-marker: r.has-marker, has-prose: r.prose != "", prose: r.prose)
 }
 
+// ---- locator arithmetic ----------------------------------------------------
+
+// 0-based mainline ply index -> the game's own raw ply number, honouring its
+// starting move number and side to move (so this works for a game beginning
+// mid-position via a `[FEN]` tag, not just a standard from-move-1 game).
+#let _raw-ply-of-index(i, start) = {
+  let start-ply = if start.turn == "w" { 2 * start.fullmove - 1 } else { 2 * start.fullmove }
+  (i + 1) + start-ply - 1
+}
+
+// 0-based mainline ply index -> a "Nw"/"Nb" locator.
+#let _locator-of-index(i, start) = {
+  let raw = _raw-ply-of-index(i, start)
+  str(int((raw + 1) / 2)) + (if calc.odd(raw) { "w" } else { "b" })
+}
+
+// 0-based mainline ply index -> the full move number it falls in.
+#let _full-move-of-index(i, start) = int((_raw-ply-of-index(i, start) + 1) / 2)
+
 // ---- automatic diagram placement -------------------------------------------
 
 // When a game carries no explicit diagram marker anywhere, diagrams are placed
-// automatically instead: after each heavily-annotated mainline move (prose of
-// `_heavy-prose-chars` characters or more), with no two diagrams closer than
+// automatically instead: after each heavily-annotated mainline move past the
+// opening (prose of `_heavy-prose-chars` characters or more, full move number
+// > `_heavy-prose-min-move`), with no two diagrams closer than
 // `_min-diagram-gap` plies -- or, if the game has no comments at all, every
-// 8 full moves. The final position always gets a diagram; an auto point fewer
-// than `_min-diagram-gap` plies before it is dropped in its favour, so output
-// is never diagram-less and never near-duplicated at the end.
+// 8 full moves. Heavy prose is common in opening theory (a note on move 4
+// citing a whole line) where a diagram adds little; gating it to past move 8
+// keeps automatic diagrams concentrated on the middlegame/endgame, where a
+// position is actually worth seeing. The final position always gets a
+// diagram; an auto point fewer than `_min-diagram-gap` plies before it is
+// dropped in its favour, so output is never diagram-less and never
+// near-duplicated at the end.
 #let _heavy-prose-chars = 180
+#let _heavy-prose-min-move = 8  // full move number; heavy-prose points only past this
 #let _min-diagram-gap = 6
 #let _plain-interval = 16  // plies between diagrams in an uncommented game
 
 // -> array of 0-based mainline node indexes after which to draw a diagram.
-#let _diagram-points(nodes) = {
+#let _diagram-points(nodes, start) = {
   let marked = range(nodes.len()).filter(i => _comment-info(nodes.at(i)).has-marker)
   if marked.len() > 0 { return marked }
   let candidates = if nodes.any(n => _comment-info(n).has-prose) {
-    range(nodes.len()).filter(i => _comment-info(nodes.at(i)).prose.len() >= _heavy-prose-chars)
+    range(nodes.len()).filter(i => (
+      _comment-info(nodes.at(i)).prose.len() >= _heavy-prose-chars
+      and _full-move-of-index(i, start) > _heavy-prose-min-move
+    ))
   } else {
     range(nodes.len()).filter(i => calc.rem(i + 1, _plain-interval) == 0)
   }
@@ -100,17 +129,6 @@
   }
   if pts.len() == 0 or pts.last() != last { pts.push(last) }
   pts
-}
-
-// ---- locator arithmetic ----------------------------------------------------
-
-// 0-based mainline ply index -> a "Nw"/"Nb" locator, honouring the game's own
-// starting move number and side to move (so this works for a game beginning
-// mid-position via a `[FEN]` tag, not just a standard from-move-1 game).
-#let _locator-of-index(i, start) = {
-  let start-ply = if start.turn == "w" { 2 * start.fullmove - 1 } else { 2 * start.fullmove }
-  let raw = (i + 1) + start-ply - 1
-  str(int((raw + 1) / 2)) + (if calc.odd(raw) { "w" } else { "b" })
 }
 
 // ---- title / subtitle auto-detection from PGN tags -------------------------
@@ -333,7 +351,7 @@
     }
 
     let nodes = movetext(g)
-    let diagram-points = _diagram-points(nodes)
+    let diagram-points = _diagram-points(nodes, start)
 
     // A PGN comment BEFORE the very first move (e.g. an introductory note) is
     // carried as the first node's `comment-before` -- `notation()` never
