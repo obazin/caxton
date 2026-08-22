@@ -16,11 +16,11 @@
 //   - `[#]` anywhere in a comment       (ChessBase / RPB Chessboard)
 //   - a comment that STARTS with `#`     (Scid's own documented rule)
 // The marker is stripped before the surrounding comment is printed as prose.
-// If a game carries no markers at all, diagrams are placed automatically:
-// after heavily-annotated mainline moves past the opening (with a minimum
-// spacing between diagrams), or at a fixed move interval when the game has
-// no comments at all -- and always at the final position, so output is
-// never diagram-less.
+// If a game carries no markers at all, diagrams are placed automatically: at
+// a fixed move interval throughout, plus extra ones after heavily-annotated
+// mainline moves past the opening (with a minimum spacing between
+// diagrams) -- and always at the final position, so output is never
+// diagram-less.
 //
 // (staunton's `notation(diagrams: true)` recognises a bare `#`, an
 // `#[caption]` form, and `[d]`/`[D]`, plus `\diagram`/`%%diagram` -- of these,
@@ -91,34 +91,38 @@
 // ---- automatic diagram placement -------------------------------------------
 
 // When a game carries no explicit diagram marker anywhere, diagrams are placed
-// automatically instead: after each heavily-annotated mainline move past the
-// opening (prose of `_heavy-prose-chars` characters or more, full move number
-// > `_heavy-prose-min-move`), with no two diagrams closer than
-// `_min-diagram-gap` plies -- or, if the game has no comments at all, every
-// 8 full moves. Heavy prose is common in opening theory (a note on move 4
-// citing a whole line) where a diagram adds little; gating it to past move 8
-// keeps automatic diagrams concentrated on the middlegame/endgame, where a
-// position is actually worth seeing. The final position always gets a
-// diagram; an auto point fewer than `_min-diagram-gap` plies before it is
-// dropped in its favour, so output is never diagram-less and never
-// near-duplicated at the end.
+// automatically instead: at a fixed interval of `_plain-interval` plies (8
+// full moves) throughout, PLUS after each heavily-annotated mainline move
+// past the opening (prose of `_heavy-prose-chars` characters or more, full
+// move number > `_heavy-prose-min-move`) -- the two are additive, not
+// alternatives, so a game whose comments are all short ("Blunder. dxe5 was
+// best.", as engines/servers commonly emit) still gets a diagram every 8
+// moves instead of falling through to just the final position; a game with
+// no comments at all gets the same fixed spacing; a heavily-annotated move
+// adds an extra diagram on top, wherever it falls. No two diagrams closer
+// than `_min-diagram-gap` plies (whichever source they came from). Heavy
+// prose is common in opening theory (a note on move 4 citing a whole line)
+// where a diagram adds little; gating it to past move 8 keeps that EXTRA
+// diagram concentrated on the middlegame/endgame, where a position is
+// actually worth seeing (the fixed interval still covers the opening). The
+// final position always gets a diagram; an auto point fewer than
+// `_min-diagram-gap` plies before it is dropped in its favour, so output is
+// never diagram-less and never near-duplicated at the end.
 #let _heavy-prose-chars = 180
 #let _heavy-prose-min-move = 8  // full move number; heavy-prose points only past this
 #let _min-diagram-gap = 6
-#let _plain-interval = 16  // plies between diagrams in an uncommented game
+#let _plain-interval = 16  // plies between fixed-interval diagrams
 
 // -> array of 0-based mainline node indexes after which to draw a diagram.
 #let _diagram-points(nodes, start) = {
   let marked = range(nodes.len()).filter(i => _comment-info(nodes.at(i)).has-marker)
   if marked.len() > 0 { return marked }
-  let candidates = if nodes.any(n => _comment-info(n).has-prose) {
-    range(nodes.len()).filter(i => (
-      _comment-info(nodes.at(i)).prose.len() >= _heavy-prose-chars
-      and _full-move-of-index(i, start) > _heavy-prose-min-move
-    ))
-  } else {
-    range(nodes.len()).filter(i => calc.rem(i + 1, _plain-interval) == 0)
-  }
+  let heavy = range(nodes.len()).filter(i => (
+    _comment-info(nodes.at(i)).prose.len() >= _heavy-prose-chars
+    and _full-move-of-index(i, start) > _heavy-prose-min-move
+  ))
+  let interval = range(nodes.len()).filter(i => calc.rem(i + 1, _plain-interval) == 0)
+  let candidates = (heavy + interval).dedup().sorted()
   let pts = ()
   for i in candidates {
     if pts.len() == 0 or i - pts.last() >= _min-diagram-gap { pts.push(i) }
