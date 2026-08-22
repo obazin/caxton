@@ -243,7 +243,9 @@
 ///   "Event, Year" from each game's tags; `none` omits it. An explicit value
 ///   applies to every game in the PGN.
 /// - paper (str): page size, forwarded to `#set page(paper: ..)`.
-/// - columns (int): column count, forwarded to `#set page(columns: ..)`.
+/// - columns (int): column count for the movetext. The title/subtitle block
+///   spans the full page width, above the columns -- only the movetext
+///   itself (and its diagrams) is split into columns.
 /// - margin (auto, dictionary, length): page margin; `auto` picks a margin
 ///   proportioned for the default A5/2-column layout.
 /// - board-size (length): each diagram's width. Tuned by default for a
@@ -296,10 +298,13 @@
 
   let gap = if marker-gap == auto { board-size / 8 / 1.5 } else { marker-gap }
 
+  // Columns are NOT set page-wide: the title/subtitle block below needs the
+  // full page width. Instead, only the movetext body (after that block) is
+  // wrapped in its own `std.columns(..)` call further down -- `std.` because
+  // `columns` here is this function's own parameter, shadowing the built-in.
   set page(
     paper: paper,
     margin: if margin == auto { (top: 20mm, bottom: 16mm, x: 12mm) } else { margin },
-    columns: columns,
   )
   set text(font: font, size: text-size, hyphenate: true)
   set par(justify: true, leading: leading)
@@ -357,59 +362,67 @@
     let nodes = movetext(g)
     let diagram-points = _diagram-points(nodes, start)
 
-    // A PGN comment BEFORE the very first move (e.g. an introductory note) is
-    // carried as the first node's `comment-before` -- `notation()` never
-    // renders that field (only `comment-after`), so it needs printing by hand.
-    let intro = nodes.first().at("comment-before", default: none)
-    if intro != none {
-      [#intro.trim()]
-      parbreak()
-    }
-
-    let run-start = 0
-    for (i, node) in nodes.enumerate() {
-      let loc = loc-of(i)
-      let info = _comment-info(node)
-      let is-last = i == nodes.len() - 1
-      // Pure marker-driven placement when the game carries any; otherwise
-      // automatic placement at heavily-annotated moves or fixed intervals
-      // (see `_diagram-points`), always including the final position.
-      let is-diagram-point = diagram-points.contains(i)
-      if info.has-prose or info.has-marker or is-last or is-diagram-point {
-        // `comments: true` is needed so prose nested INSIDE a variation still
-        // renders -- not just this run's own trailing comment. But staunton's
-        // `_move-token` concatenates a MAINLINE move's own trailing comment
-        // into the same string as the move before `strong()` wraps it, so
-        // printing it through `comments: true` here would bold the prose (and
-        // the marker) along with the move -- variations dodge this because
-        // they always render through a separate `bold: false` call. Blank out
-        // just this run's own ending comment before rendering (nested-variation
-        // comments elsewhere in the range are untouched), then print the
-        // cleaned, marker-stripped text as its own ordinary-weight paragraph.
-        let notation-source = if info.has-prose or info.has-marker {
-          let overrides = (:)
-          overrides.insert(loc, "")
-          with-comments(g, comments: overrides)
-        } else { g }
-        notation(
-          notation-source, from: loc-of(run-start), to: loc,
-          figurine: true, nags: true, variations: true, comments: true, spaced: false,
-          result: is-last,
-        )
+    // The movetext itself -- collected into one content value so it can be
+    // handed to `std.columns(..)` below, rather than flowing straight into
+    // the page (which would put it under the title/subtitle at full width
+    // too; it needs its own, narrower column measure).
+    let movetext-body = {
+      // A PGN comment BEFORE the very first move (e.g. an introductory note)
+      // is carried as the first node's `comment-before` -- `notation()`
+      // never renders that field (only `comment-after`), so it needs
+      // printing by hand.
+      let intro = nodes.first().at("comment-before", default: none)
+      if intro != none {
+        [#intro.trim()]
         parbreak()
-        if info.has-prose {
-          [#info.prose]
+      }
+
+      let run-start = 0
+      for (i, node) in nodes.enumerate() {
+        let loc = loc-of(i)
+        let info = _comment-info(node)
+        let is-last = i == nodes.len() - 1
+        // Pure marker-driven placement when the game carries any; otherwise
+        // automatic placement at heavily-annotated moves or fixed intervals
+        // (see `_diagram-points`), always including the final position.
+        let is-diagram-point = diagram-points.contains(i)
+        if info.has-prose or info.has-marker or is-last or is-diagram-point {
+          // `comments: true` is needed so prose nested INSIDE a variation still
+          // renders -- not just this run's own trailing comment. But staunton's
+          // `_move-token` concatenates a MAINLINE move's own trailing comment
+          // into the same string as the move before `strong()` wraps it, so
+          // printing it through `comments: true` here would bold the prose (and
+          // the marker) along with the move -- variations dodge this because
+          // they always render through a separate `bold: false` call. Blank out
+          // just this run's own ending comment before rendering (nested-variation
+          // comments elsewhere in the range are untouched), then print the
+          // cleaned, marker-stripped text as its own ordinary-weight paragraph.
+          let notation-source = if info.has-prose or info.has-marker {
+            let overrides = (:)
+            overrides.insert(loc, "")
+            with-comments(g, comments: overrides)
+          } else { g }
+          notation(
+            notation-source, from: loc-of(run-start), to: loc,
+            figurine: true, nags: true, variations: true, comments: true, spaced: false,
+            result: is-last,
+          )
           parbreak()
+          if info.has-prose {
+            [#info.prose]
+            parbreak()
+          }
+          if is-diagram-point {
+            // `annotations: true` turns on staunton's own `%cal`/`%csl`
+            // processing (off by default) so a move's arrows / highlighted
+            // squares draw on its diagram, same as real chess software.
+            align(center, with-marker(board(g, at: loc, annotations: true)))
+            v(2pt)
+          }
+          run-start = i + 1
         }
-        if is-diagram-point {
-          // `annotations: true` turns on staunton's own `%cal`/`%csl`
-          // processing (off by default) so a move's arrows / highlighted
-          // squares draw on its diagram, same as real chess software.
-          align(center, with-marker(board(g, at: loc, annotations: true)))
-          v(2pt)
-        }
-        run-start = i + 1
       }
     }
+    std.columns(columns, movetext-body)
   }
 }
