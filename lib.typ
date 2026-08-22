@@ -1,12 +1,23 @@
 // ===========================================================================
 // caxton -- typeset annotated PGN chess games as print-ready book pages.
 //
-// Built on top of the `staunton` chess package (@preview/staunton). Renders
-// figurine move notation with bold mainline moves, nested variations, NAGs
-// and comments, with diagrams embedded exactly where the PGN itself marks
-// them -- not at arbitrary fixed intervals. A PGN holding several games is
-// typeset game by game, each starting on a fresh page with its own title,
-// subtitle and running header read from that game's tags.
+// Built on top of a vendored copy of the `staunton` chess engine/rendering
+// package (vendor/staunton/ -- see vendor/staunton/NOTICE.md for its
+// provenance and licensing). Caxton is a single, self-contained Typst
+// package: no `@preview`/`@local` imports anywhere, only this one relative
+// file import plus whatever staunton's own code already imports from itself
+// (unchanged, all relative, since before this vendoring). staunton's own
+// engine internals (src/game.typ's mainline resolution) call out to a
+// bundled WASM plugin (vendor/staunton/src/assets/engine/shakmaty.wasm,
+// built from the Rust `shakmaty` crate) for chess move generation --
+// dramatically faster than a pure-Typst engine on diagram-heavy documents;
+// see vendor/staunton/NOTICE.md.
+//
+// Renders figurine move notation with bold mainline moves, nested
+// variations, NAGs and comments, with diagrams embedded exactly where the
+// PGN itself marks them -- not at arbitrary fixed intervals. A PGN holding
+// several games is typeset game by game, each starting on a fresh page with
+// its own title, subtitle and running header read from that game's tags.
 //
 // Diagram placement follows the two markers real chess software actually
 // writes into PGN comments. These were verified against ChessBase, Scid and
@@ -32,7 +43,7 @@
 // mechanism is also unsafe here for another reason -- seeded further down.)
 // ===========================================================================
 
-#import "@preview/staunton:2.0.0": game, notation, board, movetext, game-start, set-board-defaults, color-theme, with-comments
+#import "vendor/staunton/lib.typ": game, notation, board, movetext, game-start, set-board-defaults, color-theme, with-comments
 
 // ---- diagram marker detection ---------------------------------------------
 

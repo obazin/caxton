@@ -1,6 +1,6 @@
 # caxton
 
-Typeset annotated PGN chess games as print-ready, book-style pages — built on [`staunton`](https://github.com/ndg6/staunton). Point it at a PGN and it renders figurine move notation with bold mainline moves, nested variations, NAGs and comments, diagrams placed exactly where the PGN marks them, and a title/subtitle read straight from the PGN's own tags. A PGN holding several games (the usual multi-game file layout) is typeset game by game, each starting on a fresh page with its own title, subtitle and running header. Named after William Caxton, who introduced printing to England.
+Typeset annotated PGN chess games as print-ready, book-style pages — built on a vendored, modified copy of [`staunton`](https://github.com/ndg6/staunton) (see [Vendored engine](#vendored-engine)), so caxton is a single, self-contained Typst package with no external `@preview` dependency. Point it at a PGN and it renders figurine move notation with bold mainline moves, nested variations, NAGs and comments, diagrams placed exactly where the PGN marks them, and a title/subtitle read straight from the PGN's own tags. A PGN holding several games (the usual multi-game file layout) is typeset game by game, each starting on a fresh page with its own title, subtitle and running header. Named after William Caxton, who introduced printing to England.
 
 ![Example page](examples/preview.png)
 
@@ -67,7 +67,7 @@ With a multi-game PGN, each game starts on a fresh page; `title`/`subtitle` left
 Every field is overridable. The defaults reproduce the two-column A5, diagonally-hatched "old chess book" look this package started as; nothing about the layout is hardcoded beyond those defaults. `board-color-theme` takes any `staunton` `color-theme(..)` value — e.g. a normal green/cream board:
 
 ```typ
-#import "@preview/staunton:2.0.0": color-theme
+#import "@local/caxton:0.1.0": caxton, color-theme
 #caxton(read("game.pgn"), board-color-theme: color-theme("wikipedia"), board-labels: true)
 ```
 
@@ -100,8 +100,29 @@ git clone https://github.com/obazin/caxton.git \
 
 (On Linux, the local package directory is `$HOME/.local/share/typst/packages/local/`; on Windows, `%APPDATA%\typst\packages\local\`.) Then `#import "@local/caxton:0.1.0": caxton` as above.
 
-Alternatively, vendor `lib.typ` directly into your project and `#import "lib.typ": caxton` by relative path — the only dependency it pulls in is `@preview/staunton:2.0.0`, resolved automatically by Typst at compile time.
+Alternatively, copy this whole repo (not just `lib.typ` — it needs its `vendor/` directory alongside it) into your project and `#import "lib.typ": caxton` by relative path. Either way, caxton pulls in nothing from Typst Universe or any other package registry: it's fully self-contained.
+
+## Vendored engine
+
+`vendor/staunton/` is a snapshot of a modified fork of `staunton` — the chess
+engine and board/notation rendering caxton is built on — folded directly
+into this package rather than resolved as an external dependency, so caxton
+has no `@preview`/`@local` imports at all. The one change from upstream
+`staunton`: standard-chess mainline resolution (the hot path a diagram-heavy
+document spends nearly all its compile time in) runs through a bundled Rust
+WASM plugin (`vendor/staunton/src/assets/engine/shakmaty.wasm`, built from
+the `shakmaty` crate) instead of a pure-Typst move generator — roughly an
+order of magnitude faster end-to-end on a real, diagram-heavy multi-game PGN,
+with byte-for-byte identical output. See `vendor/staunton/NOTICE.md` for
+exactly what's vendored, where from, and — important — **an unresolved
+licensing question about the bundled WASM plugin that should be settled
+before this package is ever published or distributed.**
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The bundled example PGN (`examples/fischer_spassky_1972_g6.pgn`) is a bare game score with two short annotations written for this package; it carries no third-party commentary.
+MIT for caxton's own code — see [LICENSE](LICENSE). The bundled example PGN
+(`examples/fischer_spassky_1972_g6.pgn`) is a bare game score with two short
+annotations written for this package; it carries no third-party commentary.
+The vendored engine under `vendor/staunton/` carries its own, different
+licensing — see [Vendored engine](#vendored-engine) above and
+`vendor/staunton/NOTICE.md` before treating this repository as simply MIT.
