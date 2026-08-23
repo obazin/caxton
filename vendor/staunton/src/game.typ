@@ -277,9 +277,14 @@
     let target = _ply-of(loc.at("at"), start: start)
     assert(target >= 1 and target < entries.len(), message: "move-destination: locator out of range")
     let e = entries.at(target)
+    // A null-move ply (PGN "--"/"Z0" -- see the plugin's own docs) carries
+    // no move at all, so the plugin omits from/to/piece/color/kind on it
+    // exactly like it does on entry 0 (the starting position) -- `.at(...,
+    // default: none)`, not a bare field access, for every one of them.
     return (
-      from: e.from, to: e.to, piece: e.piece, color: e.color,
-      capture: e.at("capture-kind", default: none), kind: e.kind,
+      from: e.at("from", default: none), to: e.at("to", default: none),
+      piece: e.at("piece", default: none), color: e.at("color", default: none),
+      capture: e.at("capture-kind", default: none), kind: e.at("kind", default: none),
       promotion: e.at("promotion", default: none),
     )
   }

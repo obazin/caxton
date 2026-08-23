@@ -206,6 +206,19 @@
 // Brace-comment state is tracked across lines so a hard-wrapped comment line
 // that happens to start with `[` is never mistaken for a new tag section
 // (PGN `{}` comments don't nest; `;` comments run to end of line).
+// PGN's own "escape mechanism" (spec section 4): a line whose FIRST character
+// is `%` is not part of the game at all -- the whole line is skipped by any
+// conforming PGN reader. Real-world exporters use it for header/toolchain
+// metadata ahead of the first game (e.g. ChessBase's `% BOOKTITLE = ...`), so
+// this must run before `_split-games` walks the file, not per-game: a % line
+// sitting before the first `[Event ..]` tag has no tags of its own yet, so
+// `_split-games`'s "a tag line after movetext starts a new game" rule would
+// otherwise treat it as movetext and split off a bogus tagless leading
+// "game" -- which then fails in `game()`/the SAN resolver on the literal `%`
+// token. `(?m)` makes `^` match after every `\n`, not just the string start.
+#let _percent-escape-re = regex("(?m)^%[^\n]*\n?")
+#let _strip-percent-escapes(text) = text.replace(_percent-escape-re, "")
+
 #let _tag-rest-re = regex("^[A-Za-z0-9_]+\s*\"")
 // The three characters that drive the comment-state machine below. Scanning a
 // line for just these via one native regex pass (usually zero matches) beats
@@ -338,7 +351,7 @@
   let raw-text = if type(pgn) == str { pgn }
     else if type(pgn) == content and pgn.func() == raw { pgn.text }
     else { panic("caxton: `pgn` must be a string or a raw block") }
-  let games = _split-games(raw-text)
+  let games = _split-games(_strip-percent-escapes(raw-text))
 
   let gap = if marker-gap == auto { board-size / 8 / 1.5 } else { marker-gap }
 

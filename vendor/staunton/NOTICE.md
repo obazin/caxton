@@ -13,8 +13,7 @@ Sources
   (MIT AND GPL-2.0-or-later -- see `LICENSE` and `LICENSE-PIECES` in this
   directory, copied unchanged from upstream).
 - Fork: `staunton-fork` (local, sibling project to caxton), commit
-  `f7ce88167d55a75d01089a4552a00fce4286a688` (branch `shakmaty-engine`). Two
-  changes from upstream, both performance, both output-preserving:
+  `a3a27ce` (branch `shakmaty-engine`). Three changes from upstream:
   1. `src/game.typ`'s `_mainline-positions` (standard-chess games only)
      resolves a game's mainline through a bundled WASM plugin instead of a
      pure-Typst move generator (fork commit `3d641227` -- see its message
@@ -30,13 +29,26 @@ Sources
      messages (fen.typ, coords.typ, pieces.typ, annotations.typ, i18n.typ,
      pgn.typ). Verified against the same 218-test suite and pixel-identical
      rendering of the fork's real-document benchmark and showcase.
+  3. Bundled `shakmaty.wasm` updated (fork commits `352b3bb`, `a3a27ce`) to
+     accept PGN's null-move convention (`"--"` / `"Z0"`) -- editorial game
+     collections (e.g. annotated books) use it to attach a comment to a ply
+     without an actual move being played; the plugin previously rejected it
+     outright, which failed EVERY later diagram in that game (it resolves a
+     game's whole mainline in one call). `game.typ`'s `_resolved-move` fast
+     path also needed `.at(.., default: none)` instead of bare field access
+     for from/to/piece/color/kind, since a null-move ply's ply entry omits
+     them exactly like the starting-position entry already does -- caught by
+     a diagram requested AT the null move's own locator. No behavior change
+     for any game without a null move. Verified against the fork's
+     220-test suite (2 new regression tests added for this).
 - Plugin: `typst-shakmaty-engine` (local, sibling project to caxton) --
   the Rust source `src/assets/engine/shakmaty.wasm` is built from, wrapping
   the `shakmaty` crate (GPL-3.0-or-later) as a Typst WASM plugin. See that
   project's own README for its protocol and build instructions. The bundled
-  binary is that project's commit `24bee7e` (resolved-move fields in the
-  output; built at `opt-level = 3` -- Typst executes plugins under the
-  wasmi interpreter, where size-optimized builds run several times slower).
+  binary is that project's commit `e252318` (accepts PGN null moves via
+  `Position::swap_turn`; built at `opt-level = 3` -- Typst executes plugins
+  under the wasmi interpreter, where size-optimized builds run several
+  times slower).
 
 License status: UNRESOLVED, flagged deliberately
 -------------------------------------------------
