@@ -173,12 +173,22 @@
 
 // ---- title / subtitle auto-detection from PGN tags -------------------------
 
-#let _auto-title(g) = {
+// A PGN tag value that carries no real information: absent, blank/whitespace-
+// only (a roster field left "" by some exporters), or PGN's own placeholder
+// for "unknown" (`"?"`, e.g. `[Black "?"]` on a database extract with no
+// second player recorded). Gated behind `auto-strip-empty-title-fields`
+// rather than always on, since a caller who deliberately writes `[White "?"]`
+// as a real (if odd) roster value is entitled to see it printed verbatim.
+#let _field-present(v) = v != none and v.trim() != "" and v.trim() != "?"
+
+#let _auto-title(g, strip-empty) = {
   let w = g.tags.at("White", default: none)
   let b = g.tags.at("Black", default: none)
-  if w != none and b != none { [#w #sym.dash.en #b] }
-  else if w != none { [#w] }
-  else if b != none { [#b] }
+  let w-ok = if strip-empty { _field-present(w) } else { w != none }
+  let b-ok = if strip-empty { _field-present(b) } else { b != none }
+  if w-ok and b-ok { [#w #sym.dash.en #b] }
+  else if w-ok { [#w] }
+  else if b-ok { [#b] }
   else { none }
 }
 
@@ -190,11 +200,12 @@
   if m != none { m.captures.at(0) } else { none }
 }
 
-#let _auto-subtitle(g) = {
+#let _auto-subtitle(g, strip-empty) = {
   let ev = g.tags.at("Event", default: none)
   let yr = _year-of(g)
+  let ev-ok = if strip-empty { _field-present(ev) } else { ev != none and ev != "?" }
   let parts = ()
-  if ev != none and ev != "?" { parts.push(ev) }
+  if ev-ok { parts.push(ev) }
   if yr != none { parts.push(yr) }
   if parts.len() == 0 { none } else { parts.join(", ") }
 }
@@ -299,6 +310,12 @@
 /// - subtitle (auto, content, none): line under the title. `auto` reads
 ///   "Event, Year" from each game's tags; `none` omits it. An explicit value
 ///   applies to every game in the PGN.
+/// - auto-strip-empty-title-fields (bool): only affects `auto` title/subtitle.
+///   When true (the default), a White/Black/Event tag that's absent, blank, or
+///   PGN's own "unknown" placeholder (`"?"`) is left out of the auto-built
+///   string instead of printed verbatim -- `[White "Kasparov"] [Black "?"]`
+///   becomes the title `"Kasparov"`, not `"Kasparov -- ?"`. Set to `false` to
+///   print exactly what the tags say, `"?"` included.
 /// - paper (str): page size, forwarded to `#set page(paper: ..)`.
 /// - columns (int): column count for the movetext. The title/subtitle block
 ///   spans the full page width, above the columns -- only the movetext
@@ -332,6 +349,7 @@
   pgn,
   title: auto,
   subtitle: auto,
+  auto-strip-empty-title-fields: true,
   paper: "a5",
   columns: 2,
   margin: auto,
@@ -393,8 +411,8 @@
     let start = game-start(g)
     let loc-of(i) = _locator-of-index(i, start)
 
-    let ttl = if title != auto { title } else { _auto-title(g) }
-    let sub = if subtitle != auto { subtitle } else { _auto-subtitle(g) }
+    let ttl = if title != auto { title } else { _auto-title(g, auto-strip-empty-title-fields) }
+    let sub = if subtitle != auto { subtitle } else { _auto-subtitle(g, auto-strip-empty-title-fields) }
 
     if game-index > 0 { pagebreak(weak: true) }
     // Scoped to this loop iteration, so each game's pages carry that game's

@@ -46,6 +46,7 @@ There's also a correctness reason to reimplement this rather than call `notation
   pgn,                    // required: PGN text (string, or a ```raw block```); may hold several games
   title: auto,             // auto: "White -- Black" from each game's tags; content; none
   subtitle: auto,           // auto: "Event, Year" from each game's tags; content; none
+  auto-strip-empty-title-fields: true,  // drop blank/"?" White, Black, or Event tags from auto title/subtitle
   paper: "a5",
   columns: 2,
   margin: auto,             // auto: proportioned for the default A5/2-column layout
