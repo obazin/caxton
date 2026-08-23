@@ -84,6 +84,23 @@
   (has-marker: r.has-marker, has-prose: r.prose != "", prose: r.prose)
 }
 
+// A game with zero mainline moves (a PGN "game" that's really a standalone
+// note -- e.g. `PlyCount "0"`, just `{some comment} *`) has no move node for
+// a leading comment to attach to, so staunton's own parser drops it: its
+// `_parse-movetext` only ever transfers a pending leading comment onto a
+// node when a SAN token follows it, which never happens here (see
+// vendor/staunton/src/pgn.typ). Recovered here straight from the game's raw
+// movetext text, which `game(..)` preserves verbatim as `movetext-raw` --
+// already run through caxton's own `_strip-pgn-commands`/whitespace-collapse
+// by the time it gets there, same as every other comment. Not passed through
+// `_strip-marker`, matching the existing (non-empty-game) intro-comment
+// handling below, which never marker-strips it either.
+#let _leading-comment-re = regex("^\{([^}]*)\}")
+#let _leading-comment-of-raw(raw) = {
+  let m = raw.trim().match(_leading-comment-re)
+  if m == none { none } else { m.captures.at(0) }
+}
+
 // ---- locator arithmetic ----------------------------------------------------
 
 // 0-based mainline ply index -> the game's own raw ply number, honouring its
@@ -133,6 +150,7 @@
 // and shared with the render loop -- three separate full passes re-deriving
 // it (markers, heavy prose, rendering) was measurable on long games.
 #let _diagram-points(infos, start) = {
+  if infos.len() == 0 { return () }
   let marked = range(infos.len()).filter(i => infos.at(i).has-marker)
   if marked.len() > 0 { return marked }
   let heavy = range(infos.len()).filter(i => (
@@ -406,7 +424,9 @@
       // is carried as the first node's `comment-before` -- `notation()`
       // never renders that field (only `comment-after`), so it needs
       // printing by hand.
-      let intro = nodes.first().at("comment-before", default: none)
+      let intro = if nodes.len() > 0 {
+        nodes.first().at("comment-before", default: none)
+      } else { _leading-comment-of-raw(g.movetext-raw) }
       if intro != none {
         [#intro.trim()]
         parbreak()
