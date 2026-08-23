@@ -119,6 +119,17 @@ exactly what's vendored, where from, and — important — **an unresolved
 licensing question about the bundled WASM plugin that should be settled
 before this package is ever published or distributed.**
 
+## Development
+
+`tests/` holds caxton's own unit test suite — plain `.typ` files, each one an independent `typst compile`, asserted with `#assert(..)` (Typst has no built-in test framework, but nothing stops a package from using its own `assert`/`panic` this way; this follows the same convention as the vendored `staunton` fork's own `tests/`). Most tests import caxton's private (underscore-prefixed) helpers directly — `#import "/lib.typ": _diagram-points, ...` — since Typst doesn't enforce real module-level visibility, so the actual decision logic (diagram placement, title auto-detection, PGN splitting) is asserted on directly rather than only inferred from rendered output; a handful of true end-to-end tests (`multi_game_e2e/`, `zero_move/end_to_end.typ`, `null_move/`, `percent_escape_e2e/`) compile a full `#caxton(..)` call to catch integration-level regressions.
+
+```sh
+bash tests/run.sh              # run everything
+bash tests/run.sh tests/title  # run just one directory
+```
+
+A file with a `// EXPECT: <substr>` header is an expected-FAIL test (must error, with that substring in the message); every other file is expected-PASS (must compile). Output PDFs land under `tests/out/` (gitignored) for eyeballing if needed.
+
 ## License
 
 MIT for caxton's own code — see [LICENSE](LICENSE). The bundled example PGN
