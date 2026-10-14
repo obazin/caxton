@@ -41,11 +41,14 @@ Sources
      a diagram requested AT the null move's own locator. No behavior change
      for any game without a null move. Verified against the fork's
      220-test suite (2 new regression tests added for this).
-- Plugin: `typst-shakmaty-engine` (local, sibling project to caxton) --
+- Plugin: `typst-shakmaty-engine`,
+  https://github.com/obazin/typst-shakmaty-engine --
   the Rust source `src/assets/engine/shakmaty.wasm` is built from, wrapping
   the `shakmaty` crate (GPL-3.0-or-later) as a Typst WASM plugin. See that
   project's own README for its protocol and build instructions. The bundled
-  binary is that project's commit `e252318` (accepts PGN null moves via
+  binary is that project's commit `e252318`,
+  https://github.com/obazin/typst-shakmaty-engine/tree/e252318f301829bf2368cbe97865309e4575b561
+  (accepts PGN null moves via
   `Position::swap_turn`; built at `opt-level = 3` -- Typst executes plugins
   under the wasmi interpreter, where size-optimized builds run several
   times slower).
